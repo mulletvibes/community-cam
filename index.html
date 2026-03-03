@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CommunityCam</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <iframe
+    id="camera-frame"
+    src=""
+    frameborder="0"
+    allow="autoplay; encrypted-media; picture-in-picture"
+    allowfullscreen
+  ></iframe>
+
+  <div id="vote-overlay">
+    <div id="site-label">COMMUNITYCAM</div>
+    <div id="vote-prompt">Next feed: Beach 🌊 (12) or City 🏙️ (7)?</div>
+    <div id="countdown">29:45</div>
+  </div>
+
+  <button id="chat-toggle" class="hidden" aria-label="Open chat">CHAT</button>
+
+  <aside id="chat-panel" class="open">
+    <div id="chat-header">
+      <span>COMMUNITY CHAT</span>
+      <button id="chat-close" aria-label="Close chat">✕</button>
+    </div>
+    <div id="chat-messages">
+      <div class="chat-msg"><span class="chat-user">xX_retro_Xx:</span> beach!!</div>
+      <div class="chat-msg"><span class="chat-user">wanderlust99:</span> city vibes for sure</div>
+      <div class="chat-msg"><span class="chat-user">GlobalCamFan:</span> BEACH 🌊🌊</div>
+      <div class="chat-msg"><span class="chat-user">night_owl_88:</span> city city city</div>
+      <div class="chat-msg"><span class="chat-user">SunsetChaser:</span> beach</div>
+      <div class="chat-msg"><span class="chat-user">PixelWanderer:</span> city 🏙️</div>
+      <div class="chat-msg"><span class="chat-user">beach_bum4ever:</span> BEACH</div>
+      <div class="chat-msg"><span class="chat-user">TokioByNight:</span> city!!</div>
+    </div>
+    <div id="chat-input-area">
+      <input type="text" id="chat-input" placeholder="Type your vote..." autocomplete="off">
+      <button id="chat-send">GO</button>
+    </div>
+  </aside>
+
+  <script src="cameras.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
