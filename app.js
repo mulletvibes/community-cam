@@ -42,6 +42,16 @@ function getSessionId() {
   return id;
 }
 
+function getUsername() {
+  let name = localStorage.getItem('cc_username');
+  if (!name) {
+    const suffix = Math.floor(1000 + Math.random() * 9000);
+    name = `Guest${suffix}`;
+    localStorage.setItem('cc_username', name);
+  }
+  return name;
+}
+
 function hasVotedThisRound() {
   return !!localStorage.getItem(`cc_voted_${currentRoundEndsAt}`);
 }
@@ -133,7 +143,9 @@ async function handleRoundEnd(roundEndsAt) {
 
   // Re-fetch to get the final vote counts before deciding the winner
   const { data: state } = await db.from('round_state').select('*').limit(1).single();
-  if (!state || state.round_ends_at !== roundEndsAt) return; // already transitioned
+  // Use Date comparison — Supabase can return the same timestamp in different
+  // timezone string formats (e.g. +00:00 vs Z), so string equality is unreliable
+  if (!state || new Date(state.round_ends_at).getTime() !== new Date(roundEndsAt).getTime()) return;
 
   // Determine winner (random on tie)
   let winnerKey;
@@ -160,7 +172,7 @@ async function handleRoundEnd(roundEndsAt) {
   const nextPrompt = PROMPTS[(idx + 1) % PROMPTS.length];
 
   // Conditional update — only succeeds if round_ends_at still matches
-  await db.rpc('transition_round', {
+  const { error: transitionError } = await db.rpc('transition_round', {
     expected_ends_at:  state.round_ends_at,
     new_camera_id:     nextCamera.id,
     new_prompt:        nextPrompt.display,
@@ -168,6 +180,7 @@ async function handleRoundEnd(roundEndsAt) {
     new_option_b:      nextPrompt.option_b,
     new_round_ends_at: new Date(Date.now() + ROUND_DURATION_MS).toISOString(),
   });
+  if (transitionError) console.error('[transition] transition_round RPC error:', transitionError);
 
   // The realtime subscription handles the UI update when Supabase broadcasts the change
 }
@@ -195,15 +208,19 @@ function detectVote(message, optionA, optionB) {
 }
 
 async function submitVote(choice) {
-  markVotedThisRound();
   const col = choice === currentState.option_a ? 'votes_a' : 'votes_b';
-  await Promise.all([
+  const [{ error: insertError }, { error: rpcError }] = await Promise.all([
     db.from('votes').insert({ session_id: getSessionId(), choice }),
     db.rpc('increment_vote', { col }),
   ]);
+  if (insertError) console.error('[vote] insert error:', insertError);
+  if (rpcError)    console.error('[vote] increment_vote error:', rpcError);
+  // Only lock the user out of voting again if both writes succeeded
+  if (!insertError && !rpcError) markVotedThisRound();
 }
 
 // ── Chat UI ───────────────────────────────────────────────────────────────────
+// Note: chat messages are local only — cross-tab/cross-user chat sync is a future feature
 
 function appendToChat(el) {
   const msgs = document.getElementById('chat-messages');
@@ -235,7 +252,7 @@ async function handleChatSubmit() {
   if (!message || !currentState) return;
 
   input.value = '';
-  addChatMessage('You', message);
+  addChatMessage(getUsername(), message);
 
   const vote = detectVote(message, currentState.option_a, currentState.option_b);
   if (!vote) return;
