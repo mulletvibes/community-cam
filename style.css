@@ -196,6 +196,12 @@ html, body {
   color: var(--cyan);
 }
 
+.chat-system {
+  color: var(--yellow);
+  opacity: 0.8;
+  font-style: italic;
+}
+
 #chat-input-area {
   display: flex;
   gap: 6px;
