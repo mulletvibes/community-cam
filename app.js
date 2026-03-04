@@ -128,7 +128,12 @@ async function loadCamera(camera) {
 // ── Dead feed safeguard ───────────────────────────────────────────────────────
 
 async function handleDeadFeed() {
-  if (!currentState || !currentCameraId) return;
+  console.log('[dead feed] handleDeadFeed called. currentCameraId:', currentCameraId, '| currentState:', currentState);
+
+  if (!currentState || !currentCameraId) {
+    console.warn('[dead feed] aborting — currentState or currentCameraId is null');
+    return;
+  }
 
   deadFeedTriedCams.add(currentCameraId);
 
@@ -141,10 +146,12 @@ async function handleDeadFeed() {
       !deadFeedTriedCams.has(c.id)
     );
   }
+  console.log('[dead feed] prompt pool size:', pool.length, '| prompt:', p ? `${p.option_a}/${p.option_b}` : 'none');
 
   // Fallback: full camera pool minus already-tried cameras
   if (pool.length === 0) {
     pool = CAMERAS.filter(c => !deadFeedTriedCams.has(c.id));
+    console.log('[dead feed] using full pool fallback, size:', pool.length);
   }
 
   // All cameras exhausted — reset and try full pool minus current only
@@ -152,19 +159,29 @@ async function handleDeadFeed() {
     deadFeedTriedCams.clear();
     deadFeedTriedCams.add(currentCameraId);
     pool = CAMERAS.filter(c => !deadFeedTriedCams.has(c.id));
+    console.log('[dead feed] all cameras exhausted — reset. pool size:', pool.length);
   }
 
-  if (pool.length === 0) return; // only one camera in total, give up
+  if (pool.length === 0) {
+    console.warn('[dead feed] no cameras available, giving up');
+    return;
+  }
 
   document.getElementById('vote-prompt').textContent = '📡 Switching feed...';
 
   const nextCamera = pool[Math.floor(Math.random() * pool.length)];
+  console.log('[dead feed] selected fallback camera:', nextCamera.id, nextCamera.name);
+  console.log('[dead feed] calling RPC — expected_camera_id:', currentCameraId, '→ new_camera_id:', nextCamera.id);
+
+  // Also fetch current DB state to verify expected_camera_id matches
+  const { data: dbState, error: fetchError } = await db.from('round_state').select('current_camera_id').limit(1).single();
+  console.log('[dead feed] DB current_camera_id:', dbState?.current_camera_id, '| fetchError:', fetchError);
 
   const { error } = await db.rpc('switch_camera_mid_round', {
     expected_camera_id: currentCameraId,
     new_camera_id:      nextCamera.id,
   });
-  if (error) console.error('[dead feed] switch_camera_mid_round error:', error);
+  console.log('[dead feed] RPC result — error:', error);
   // Realtime subscription handles the UI update for all connected clients
 }
 
