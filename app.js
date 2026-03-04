@@ -28,6 +28,7 @@ let currentRoundEndsAt = null;
 let currentState       = null;
 let countdownInterval  = null;
 let lastRoundEndsAt    = null;           // detects when a new round starts
+let locationClockInterval = null;
 
 const transitionedRounds = new Set();    // prevents double-firing per round end
 
@@ -66,6 +67,7 @@ function loadCamera(camera) {
   document.getElementById('camera-frame').src =
     `https://www.youtube.com/embed/${camera.embedId}` +
     '?autoplay=1&mute=1&controls=0&disablekb=1&playsinline=1&iv_load_policy=3&rel=0';
+  showLocationOverlay(camera);
 }
 
 // ── Overlay rendering ─────────────────────────────────────────────────────────
@@ -289,6 +291,91 @@ document.getElementById('chat-send').addEventListener('click', handleChatSubmit)
 document.getElementById('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') handleChatSubmit();
 });
+
+// ── Location / weather overlay ────────────────────────────────────────────────
+
+const WMO = {
+  0:  { label: 'Clear',            emoji: '☀️'  },
+  1:  { label: 'Mainly clear',     emoji: '🌤️'  },
+  2:  { label: 'Partly cloudy',    emoji: '⛅'  },
+  3:  { label: 'Overcast',         emoji: '☁️'  },
+  45: { label: 'Foggy',            emoji: '🌫️'  },
+  48: { label: 'Icy fog',          emoji: '🌫️'  },
+  51: { label: 'Light drizzle',    emoji: '🌦️'  },
+  53: { label: 'Drizzle',          emoji: '🌦️'  },
+  55: { label: 'Heavy drizzle',    emoji: '🌦️'  },
+  56: { label: 'Freezing drizzle', emoji: '🌨️'  },
+  57: { label: 'Freezing drizzle', emoji: '🌨️'  },
+  61: { label: 'Light rain',       emoji: '🌧️'  },
+  63: { label: 'Rain',             emoji: '🌧️'  },
+  65: { label: 'Heavy rain',       emoji: '🌧️'  },
+  66: { label: 'Freezing rain',    emoji: '🌨️'  },
+  67: { label: 'Freezing rain',    emoji: '🌨️'  },
+  71: { label: 'Light snow',       emoji: '❄️'   },
+  73: { label: 'Snow',             emoji: '❄️'   },
+  75: { label: 'Heavy snow',       emoji: '❄️'   },
+  77: { label: 'Snow grains',      emoji: '🌨️'  },
+  80: { label: 'Showers',          emoji: '🌦️'  },
+  81: { label: 'Showers',          emoji: '🌦️'  },
+  82: { label: 'Heavy showers',    emoji: '⛈️'  },
+  85: { label: 'Snow showers',     emoji: '❄️'   },
+  86: { label: 'Snow showers',     emoji: '❄️'   },
+  95: { label: 'Thunderstorm',     emoji: '⛈️'  },
+  96: { label: 'Thunderstorm',     emoji: '⛈️'  },
+  99: { label: 'Thunderstorm',     emoji: '⛈️'  },
+};
+
+async function fetchWeather(camera) {
+  try {
+    const res = await fetch(
+      `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${camera.lat}&longitude=${camera.lng}` +
+      `&current=weather_code,temperature_2m&timezone=auto&forecast_days=1`
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return json.current ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function startLocationClock(timezone) {
+  if (locationClockInterval) clearInterval(locationClockInterval);
+  const el  = document.getElementById('loc-time');
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+    timeZone: timezone,
+  });
+  const tick = () => { el.textContent = fmt.format(new Date()); };
+  tick();
+  locationClockInterval = setInterval(tick, 1000);
+}
+
+async function showLocationOverlay(camera) {
+  const overlay = document.getElementById('location-overlay');
+
+  // If already visible, slide it down first and wait for the transition to clear
+  const wasVisible = overlay.classList.contains('visible');
+  if (wasVisible) overlay.classList.remove('visible');
+
+  // Fetch weather in parallel with the slide-down wait
+  const [weather] = await Promise.all([
+    fetchWeather(camera),
+    wasVisible ? new Promise(r => setTimeout(r, 450)) : Promise.resolve(),
+  ]);
+
+  document.getElementById('loc-name').textContent = camera.location;
+  startLocationClock(camera.timezone);
+
+  const wmo = weather ? (WMO[weather.weather_code] ?? { label: 'Unknown', emoji: '🌐' }) : null;
+  document.getElementById('loc-weather').textContent = wmo
+    ? `${wmo.emoji} ${wmo.label} · ${Math.round(weather.temperature_2m)}°C`
+    : '';
+
+  overlay.classList.add('visible');
+}
 
 // ── Persistent chat ───────────────────────────────────────────────────────────
 
