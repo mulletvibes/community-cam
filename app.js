@@ -194,7 +194,10 @@ function subscribeToRoundState() {
       { event: 'UPDATE', schema: 'public', table: 'round_state' },
       ({ new: state }) => applyRoundState(state)
     )
-    .subscribe();
+    .subscribe((status, err) => {
+      console.log('[realtime] status:', status);
+      if (err) console.error('[realtime] error:', err);
+    });
 }
 
 // ── Vote detection ────────────────────────────────────────────────────────────
@@ -252,9 +255,13 @@ async function handleChatSubmit() {
   if (!message || !currentState) return;
 
   input.value = '';
-  addChatMessage(getUsername(), message);
 
   const vote = detectVote(message, currentState.option_a, currentState.option_b);
+
+  const { error: chatError } = await db
+    .from('chat_messages')
+    .insert({ username: getUsername(), message });
+  if (chatError) console.error('[chat] send error:', chatError);
   if (!vote) return;
 
   if (hasVotedThisRound()) {
@@ -283,6 +290,31 @@ document.getElementById('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') handleChatSubmit();
 });
 
+// ── Persistent chat ───────────────────────────────────────────────────────────
+
+async function loadChatHistory() {
+  const { data, error } = await db
+    .from('chat_messages')
+    .select('username, message')
+    .order('created_at', { ascending: true })
+    .limit(50);
+  if (error) { console.error('[chat] load error:', error); return; }
+  data.forEach(row => addChatMessage(row.username, row.message));
+}
+
+function subscribeToChatMessages() {
+  db.channel('chat_messages_changes')
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+      ({ new: row }) => addChatMessage(row.username, row.message)
+    )
+    .subscribe((status, err) => {
+      console.log('[chat realtime] status:', status);
+      if (err) console.error('[chat realtime] error:', err);
+    });
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
@@ -299,6 +331,8 @@ async function init() {
 
   applyRoundState(data);
   subscribeToRoundState();
+  await loadChatHistory();
+  subscribeToChatMessages();
 }
 
 init();
