@@ -19,7 +19,58 @@ const PROMPTS = [
   { display: 'Sun ☀️ or Snow ❄️?',        option_a: 'sun',      label_a: 'Sun ☀️',      tagField_a: 'weather', tagValue_a: 'sunny',    option_b: 'snow',     label_b: 'Snow ❄️',    tagField_b: 'weather', tagValue_b: 'snowy'   },
 ];
 
-const ROUND_DURATION_MS = 30 * 60 * 1000;
+const ROUND_DURATION_MS = 10 * 60 * 1000;
+
+// ── YouTube IFrame Player ─────────────────────────────────────────────────────
+
+let ytPlayer = null;
+let deadFeedTimeout   = null;
+let deadFeedTriedCams = new Set();
+
+// Resolves once YT.Player fires onReady (player is initialised and ready for API calls)
+let ytReadyResolve;
+const ytReady = new Promise(resolve => { ytReadyResolve = resolve; });
+
+window.onYouTubeIframeAPIReady = function () {
+  ytPlayer = new YT.Player('camera-frame', {
+    width:  '100%',
+    height: '100%',
+    playerVars: {
+      autoplay:       1,
+      mute:           1,
+      controls:       0,
+      disablekb:      1,
+      playsinline:    1,
+      iv_load_policy: 3,
+      rel:            0,
+    },
+    events: {
+      onReady:       () => ytReadyResolve(),
+      onStateChange: onYTStateChange,
+      onError:       onYTError,
+    },
+  });
+};
+
+function onYTStateChange(event) {
+  if (event.data === YT.PlayerState.PLAYING) {
+    clearDeadFeedTimeout();
+    deadFeedTriedCams.clear();   // successful playback — reset retry tracking
+  }
+}
+
+function onYTError(event) {
+  clearDeadFeedTimeout();
+  console.warn('[dead feed] YT error code:', event.data);
+  handleDeadFeed();
+}
+
+function clearDeadFeedTimeout() {
+  if (deadFeedTimeout) {
+    clearTimeout(deadFeedTimeout);
+    deadFeedTimeout = null;
+  }
+}
 
 // ── Runtime state ─────────────────────────────────────────────────────────────
 
@@ -63,11 +114,58 @@ function markVotedThisRound() {
 
 // ── Camera loading ────────────────────────────────────────────────────────────
 
-function loadCamera(camera) {
-  document.getElementById('camera-frame').src =
-    `https://www.youtube.com/embed/${camera.embedId}` +
-    '?autoplay=1&mute=1&controls=0&disablekb=1&playsinline=1&iv_load_policy=3&rel=0';
+async function loadCamera(camera) {
+  await ytReady;
+  clearDeadFeedTimeout();
+  ytPlayer.loadVideoById(camera.embedId);
+  deadFeedTimeout = setTimeout(() => {
+    console.warn('[dead feed] timeout — no playback after 15s for:', camera.id);
+    handleDeadFeed();
+  }, 15000);
   showLocationOverlay(camera);
+}
+
+// ── Dead feed safeguard ───────────────────────────────────────────────────────
+
+async function handleDeadFeed() {
+  if (!currentState || !currentCameraId) return;
+
+  deadFeedTriedCams.add(currentCameraId);
+
+  // Build pool: cameras matching current round's prompt options (both sides)
+  const p = findPrompt(currentState.option_a, currentState.option_b);
+  let pool = [];
+  if (p) {
+    pool = CAMERAS.filter(c =>
+      (c.tags[p.tagField_a] === p.tagValue_a || c.tags[p.tagField_b] === p.tagValue_b) &&
+      !deadFeedTriedCams.has(c.id)
+    );
+  }
+
+  // Fallback: full camera pool minus already-tried cameras
+  if (pool.length === 0) {
+    pool = CAMERAS.filter(c => !deadFeedTriedCams.has(c.id));
+  }
+
+  // All cameras exhausted — reset and try full pool minus current only
+  if (pool.length === 0) {
+    deadFeedTriedCams.clear();
+    deadFeedTriedCams.add(currentCameraId);
+    pool = CAMERAS.filter(c => !deadFeedTriedCams.has(c.id));
+  }
+
+  if (pool.length === 0) return; // only one camera in total, give up
+
+  document.getElementById('vote-prompt').textContent = '📡 Switching feed...';
+
+  const nextCamera = pool[Math.floor(Math.random() * pool.length)];
+
+  const { error } = await db.rpc('switch_camera_mid_round', {
+    expected_camera_id: currentCameraId,
+    new_camera_id:      nextCamera.id,
+  });
+  if (error) console.error('[dead feed] switch_camera_mid_round error:', error);
+  // Realtime subscription handles the UI update for all connected clients
 }
 
 // ── Overlay rendering ─────────────────────────────────────────────────────────
@@ -130,6 +228,7 @@ function applyRoundState(state) {
   // Show a vote hint in chat whenever a new round starts
   if (state.round_ends_at !== lastRoundEndsAt) {
     lastRoundEndsAt = state.round_ends_at;
+    deadFeedTriedCams.clear();
     addSystemMessage(
       `🗳 New round! Type "${state.option_a}" or "${state.option_b}" to vote.`
     );
