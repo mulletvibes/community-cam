@@ -56,6 +56,10 @@ function onYTStateChange(event) {
   if (event.data === YT.PlayerState.PLAYING) {
     clearDeadFeedTimeout();
     deadFeedTriedCams.clear();   // successful playback — reset retry tracking
+  } else if (event.data === YT.PlayerState.BUFFERING) {
+    // Buffering can mean an ad is loading — reset the clock so we don't
+    // mistake a slow ad pre-roll for a dead feed
+    armDeadFeedTimeout();
   }
 }
 
@@ -63,6 +67,14 @@ function onYTError(event) {
   clearDeadFeedTimeout();
   console.warn('[dead feed] YT error code:', event.data);
   handleDeadFeed();
+}
+
+function armDeadFeedTimeout() {
+  clearDeadFeedTimeout();
+  deadFeedTimeout = setTimeout(() => {
+    console.warn('[dead feed] timeout — no playback after 15s');
+    handleDeadFeed();
+  }, 15000);
 }
 
 function clearDeadFeedTimeout() {
@@ -116,12 +128,8 @@ function markVotedThisRound() {
 
 async function loadCamera(camera) {
   await ytReady;
-  clearDeadFeedTimeout();
   ytPlayer.loadVideoById(camera.embedId);
-  deadFeedTimeout = setTimeout(() => {
-    console.warn('[dead feed] timeout — no playback after 15s for:', camera.id);
-    handleDeadFeed();
-  }, 15000);
+  armDeadFeedTimeout();
   showLocationOverlay(camera);
 }
 
@@ -518,9 +526,28 @@ function subscribeToChatMessages() {
     });
 }
 
+// ── Chat visibility ───────────────────────────────────────────────────────────
+
+const CHAT_BREAKPOINT = 1024;
+
+function closeChatPanel() {
+  document.getElementById('chat-panel').classList.remove('open');
+  document.getElementById('chat-toggle').classList.remove('hidden');
+}
+
+function initChatVisibility() {
+  if (window.innerWidth < CHAT_BREAKPOINT) closeChatPanel();
+}
+
+window.addEventListener('resize', () => {
+  if (window.innerWidth < CHAT_BREAKPOINT) closeChatPanel();
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function init() {
+  initChatVisibility();
+
   const { data, error } = await db
     .from('round_state')
     .select('*')
