@@ -60,6 +60,12 @@ function onYTStateChange(event) {
     // Buffering can mean an ad is loading — reset the clock so we don't
     // mistake a slow ad pre-roll for a dead feed
     armDeadFeedTimeout();
+  } else if (event.data === YT.PlayerState.ENDED) {
+    // Live stream ended or recording unavailable ("This live stream recording
+    // is not available") — treat immediately as a dead feed
+    clearDeadFeedTimeout();
+    console.warn('[dead feed] player state ENDED — stream finished or recording unavailable');
+    handleDeadFeed();
   }
 }
 
@@ -181,16 +187,31 @@ async function handleDeadFeed() {
   console.log('[dead feed] selected fallback camera:', nextCamera.id, nextCamera.name);
   console.log('[dead feed] calling RPC — expected_camera_id:', currentCameraId, '→ new_camera_id:', nextCamera.id);
 
-  // Also fetch current DB state to verify expected_camera_id matches
+  // Fetch current DB state to verify expected_camera_id matches before RPC
   const { data: dbState, error: fetchError } = await db.from('round_state').select('current_camera_id').limit(1).single();
-  console.log('[dead feed] DB current_camera_id:', dbState?.current_camera_id, '| fetchError:', fetchError);
+  console.log('[dead feed] DB current_camera_id:', dbState?.current_camera_id, '(type:', typeof dbState?.current_camera_id, ') | local currentCameraId:', currentCameraId, '(type:', typeof currentCameraId, ') | fetchError:', fetchError);
+  if (dbState && dbState.current_camera_id !== currentCameraId) {
+    console.warn('[dead feed] WHERE mismatch — DB has', dbState.current_camera_id, 'but expected', currentCameraId, '— RPC will update 0 rows');
+  }
+
+  const deadCameraId = currentCameraId;
 
   const { error } = await db.rpc('switch_camera_mid_round', {
     expected_camera_id: currentCameraId,
     new_camera_id:      nextCamera.id,
   });
   console.log('[dead feed] RPC result — error:', error);
-  // Realtime subscription handles the UI update for all connected clients
+
+  // Local fallback: if the global switch (RPC + realtime) hasn't moved us off
+  // the dead camera within 20s, force a client-side switch so this user is unstuck
+  setTimeout(() => {
+    if (currentCameraId === deadCameraId) {
+      console.warn('[dead feed] global switch did not complete after 20s — forcing local switch to', nextCamera.id);
+      currentCameraId = nextCamera.id;
+      loadCamera(nextCamera);
+      if (currentState) renderOverlay(currentState);
+    }
+  }, 20000);
 }
 
 // ── Overlay rendering ─────────────────────────────────────────────────────────
