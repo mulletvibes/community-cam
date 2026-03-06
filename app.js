@@ -539,8 +539,12 @@ function initChatVisibility() {
   if (window.innerWidth < CHAT_BREAKPOINT) closeChatPanel();
 }
 
+let lastKnownWidth = window.innerWidth;
 window.addEventListener('resize', () => {
-  if (window.innerWidth < CHAT_BREAKPOINT) closeChatPanel();
+  const currentWidth = window.innerWidth;
+  if (currentWidth === lastKnownWidth) return; // height-only change (e.g. mobile keyboard)
+  lastKnownWidth = currentWidth;
+  if (currentWidth < CHAT_BREAKPOINT) closeChatPanel();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
